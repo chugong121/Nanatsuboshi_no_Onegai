@@ -1965,13 +1965,14 @@
     })();
   </script>
   <script>
-/* Standalone solo play engine for ななつぼしの おねがい */
-(() => {
-  const root = document.getElementById('nanatsuboshi-flow');
-  if (!root) return;
-  const $ = (s, el=root) => el.querySelector(s);
-  const faces = ['⚀','⚁','⚂','⚃','⚄','⚅'];
-  const cards = [
+/* Shared rules engine for ななつぼしの おねがい.
+ * It contains no DOM, timers, AI presentation, or network code so the same
+ * decisions can be used by solo play and online play.
+ */
+((global) => {
+  'use strict';
+
+  const CARDS = Object.freeze([
     null,
     ['まいごのモモンガ','ころがし中の星1個を振り直す'],
     ['寄り添うこぐま','手番開始時に星を1個追加'],
@@ -1993,42 +1994,272 @@
     ['ほしを背負うおおぐま','手番開始時に星を2個追加'],
     ['願いの流れ星','願いの夜を始める'],
     ['月ウサギ','好きな目の星を1個追加']
-  ];
-  const cardConditions = [null,
-    'まだ「まいごのモモンガ」を持っていないとき。','この手番で「まいごのモモンガ」をつかう。','同じ目の星が2個以上。','星の結果がすべて奇数。','星の結果がすべて偶数。','星の合計が15以上。','同じ目の星が3個以上。','同じ目の星が4個以上。','星の合計が20以上。','同じ目2個ずつの組が2組。','同じ目3個の組と2個の組。','星の合計が30以上。','同じ目の星が5個以上。','1〜5または2〜6の連番。','1〜6が1個ずつ。','同じ目2個ずつの組が3組。','同じ目3個ずつの組が2組。','同じ目の星が6個以上。','同じ目の星が7個以上。','最初に願いの流れ星を呼ぶ。'
-  ];
+  ].map((card) => card && Object.freeze(card)));
+
+  const CARD_CONDITIONS = Object.freeze([
+    null,
+    'まだ「まいごのモモンガ」を持っていないとき。',
+    'この手番で「まいごのモモンガ」をつかう。',
+    '同じ目の星が2個以上。',
+    '星の結果がすべて奇数。',
+    '星の結果がすべて偶数。',
+    '星の合計が15以上。',
+    '同じ目の星が3個以上。',
+    '同じ目の星が4個以上。',
+    '星の合計が20以上。',
+    '同じ目2個ずつの組が2組。',
+    '同じ目3個の組と2個の組。',
+    '星の合計が30以上。',
+    '同じ目の星が5個以上。',
+    '1〜5または2〜6の連番。',
+    '1〜6が1個ずつ。',
+    '同じ目2個ずつの組が3組。',
+    '同じ目3個ずつの組が2組。',
+    '同じ目の星が6個以上。',
+    '同じ目の星が7個以上。',
+    '最初に願いの流れ星を呼ぶ。'
+  ]);
+
+  const AUTO_CARDS = Object.freeze([2, 3, 18]);
+  const FIXED_DIE_CARDS = Object.freeze({6:1, 7:2, 8:3, 12:4, 13:5, 16:6});
+  const asSet = (value) => value instanceof Set ? value : new Set(value || []);
+  const validFace = (value) => Number.isInteger(value) && value >= 1 && value <= 6;
+  const countFaces = (dice) => dice.reduce((counts, value) => {
+    counts[value] = (counts[value] || 0) + 1;
+    return counts;
+  }, {});
+  const totalDice = (dice) => dice.reduce((sum, value) => sum + value, 0);
+  const scoreDice = (dice) => Object.entries(countFaces(dice))
+    .map(([value, count]) => ({v:Number(value), n:count}))
+    .sort((left, right) => right.n - left.n || right.v - left.v)[0] || {v:0, n:0};
+  const hasMatching = (dice, amount) => scoreDice(dice).n >= amount;
+  const pairGroups = (dice) => Object.values(countFaces(dice)).filter((count) => count >= 2).length;
+  const hasFullHouse = (dice) => {
+    const groups = Object.values(countFaces(dice)).sort((left, right) => right - left);
+    return groups[0] >= 3 && (groups[1] >= 2 || groups[0] >= 5);
+  };
+  const hasStraightFive = (dice) => [1,2,3,4,5].every((value) => dice.includes(value)) || [2,3,4,5,6].every((value) => dice.includes(value));
+
+  function rollDie(random = Math.random) {
+    return Math.floor(random() * 6) + 1;
+  }
+
+  function meetsRecruitCondition(no, dice, player) {
+    const cards = player?.cards || [];
+    const used = asSet(player?.used);
+    if (no === 1) return !cards.includes(1);
+    if (no === 2) return cards.includes(1) && used.has(1);
+    if (no === 3) return hasMatching(dice, 2);
+    if (no === 4) return dice.length > 0 && dice.every((value) => value % 2 === 1);
+    if (no === 5) return dice.length > 0 && dice.every((value) => value % 2 === 0);
+    if (no === 6) return totalDice(dice) >= 15;
+    if (no === 7) return hasMatching(dice, 3);
+    if (no === 8) return hasMatching(dice, 4);
+    if (no === 9) return totalDice(dice) >= 20;
+    if (no === 10) return pairGroups(dice) >= 2 || hasMatching(dice, 4);
+    if (no === 11) return hasFullHouse(dice);
+    if (no === 12) return totalDice(dice) >= 30;
+    if (no === 13) return hasMatching(dice, 5);
+    if (no === 14) return hasStraightFive(dice);
+    if (no === 15) return [1,2,3,4,5,6].every((value) => dice.includes(value));
+    if (no === 16) {
+      const groups = Object.values(countFaces(dice)).sort((left, right) => right - left);
+      return ((groups[0] || 0) + (groups[1] || 0) + (groups[2] || 0) >= 6 && groups.filter((count) => count >= 2).length >= 3) || hasMatching(dice, 6);
+    }
+    if (no === 17) return Object.values(countFaces(dice)).filter((count) => count >= 3).length >= 2 || hasMatching(dice, 6);
+    if (no === 18) return hasMatching(dice, 6);
+    if (no === 19) return hasMatching(dice, 7);
+    return false;
+  }
+
+  function eligibleCompanions(player, dice) {
+    const list = [];
+    for (let no = 2; no <= 19; no += 1) {
+      if (meetsRecruitCondition(no, dice, player) && (!player.cards.includes(no) || no === 2)) list.push(no);
+    }
+    if (!list.length && !player.cards.includes(1)) list.push(1);
+    return list;
+  }
+
+  function baseDiceCount(player) {
+    const cards = player?.cards || [];
+    return 3 + cards.filter((no) => no === 2).length + (cards.includes(3) ? 1 : 0) + (cards.includes(18) ? 2 : 0);
+  }
+
+  const compareScores = (left, right) => (right?.score?.n || 0) - (left?.score?.n || 0) || (right?.score?.v || 0) - (left?.score?.v || 0);
+  const rankPlayers = (players) => [...players].sort(compareScores);
+
+  const maxAbilityTargets = (no) => [1,4,10,14].includes(no) ? 1 : no === 5 ? 2 : no === 15 ? 3 : 99;
+  function canTargetAbilityDie(no, value) {
+    if (!validFace(value)) return false;
+    if (no === 4 || no === 11) return value < 6;
+    if (no === 17) return value <= 4;
+    return true;
+  }
+
+  function abilityInstruction(no) {
+    return ({
+      1:'振り直す「ころがし中の星」を1個選んでね。',
+      4:'増やす星を1個選び、増やす数を選んでね。',
+      5:'配分し直す星を2個選び、合計が同じになる新しい目を決めてね。',
+      9:'振り直す「ころがし中の星」を1個以上選んでね。',
+      10:'変える「ころがし中の星」と、まねする「決めた星」を1個ずつ選んでね。',
+      11:'1増やす「ころがし中の星」を1個以上選んでね。',
+      14:'変える星を1個選び、新しい目を選んでね。',
+      15:'作り直す星を3個選び、合計が同じになる新しい目を決めてね。',
+      17:'2増やす「ころがし中の星」を1個以上選んでね。',
+      20:'追加する星の目を選んでね。'
+    })[no] || '対象を選んでね。';
+  }
+
+  function isAbilityReady({ability, rolling, kept}) {
+    if (!ability || ability.locked) return false;
+    const rollingIndices = [...asSet(ability.rolling)].sort((left, right) => left - right);
+    const keptIndices = [...asSet(ability.kept)];
+    const selectedDice = rollingIndices.map((index) => rolling[index]);
+    const count = rollingIndices.length;
+    if (selectedDice.some((value) => !validFace(value))) return false;
+    if (ability.no === 1) return count === 1;
+    if (ability.no === 4) return count === 1 && ability.value >= 1 && ability.value <= 3 && selectedDice[0] + ability.value <= 6;
+    if (ability.no === 5 || ability.no === 15) {
+      const needed = ability.no === 5 ? 2 : 3;
+      return count === needed && ability.values?.length === needed && ability.values.every(validFace) && totalDice(ability.values) === totalDice(selectedDice);
+    }
+    if (ability.no === 9) return count >= 1;
+    if (ability.no === 10) return count === 1 && keptIndices.length === 1 && validFace(kept[keptIndices[0]]);
+    if (ability.no === 11) return count >= 1 && selectedDice.every((value) => value < 6);
+    if (ability.no === 14) return count === 1 && validFace(ability.value);
+    if (ability.no === 17) return count >= 1 && selectedDice.every((value) => value <= 4);
+    if (ability.no === 20) return validFace(ability.value);
+    return false;
+  }
+
+  function abilityAvailability(no, state, player) {
+    const used = asSet(player?.used);
+    if (player?.ai) return {ok:false, label:'AIの手番です'};
+    if (AUTO_CARDS.includes(no)) return {ok:false, label:'手番開始時に自動で発動します'};
+    if (no === 19) return {ok:false, label:'仲間を迎えるときに使います'};
+    if (used.has(no)) return {ok:false, label:'この手番では使用ずみ'};
+    if (state.ability) return {ok:false, label:state.ability.no === no ? 'このちからを発動中' : '別の仲間のちからを使用中'};
+    if (state.phase !== 'roll') return {ok:false, label:'星を決め終える前に使えます'};
+    if (!state.rolled) return {ok:false, label:'星を振ったあとに使えます'};
+    if (!state.rolling.length && no !== 20) return {ok:false, label:'ころがし中の星が必要です'};
+    if (no === 5 && state.rolling.length < 2) return {ok:false, label:'ころがし中の星が2個必要です'};
+    if (no === 10 && !state.kept.length) return {ok:false, label:'決めた星が1個必要です'};
+    if (no === 15 && state.rolling.length < 3) return {ok:false, label:'ころがし中の星が3個必要です'};
+    if (no === 4 && !state.rolling.some((value) => value < 6)) return {ok:false, label:'増やせる星（1〜5）が必要です'};
+    if (no === 11 && !state.rolling.some((value) => value < 6)) return {ok:false, label:'増やせる星（1〜5）が必要です'};
+    if (no === 17 && !state.rolling.some((value) => value <= 4)) return {ok:false, label:'2増やせる星（1〜4）が必要です'};
+    return {ok:true, label:'このちからを使う'};
+  }
+
+  function resolveAbility({ability, rolling, kept, random = Math.random}) {
+    if (!isAbilityReady({ability, rolling, kept})) return {ok:false, rolling:[...rolling]};
+    const next = [...rolling];
+    const indices = [...asSet(ability.rolling)].sort((left, right) => left - right);
+    const keptIndex = [...asSet(ability.kept)][0];
+    const no = ability.no;
+    if (no === 1 || no === 9) indices.forEach((index) => { next[index] = rollDie(random); });
+    else if (no === 4) next[indices[0]] += ability.value;
+    else if (no === 5 || no === 15) indices.forEach((index, position) => { next[index] = ability.values[position]; });
+    else if (no === 10) next[indices[0]] = kept[keptIndex];
+    else if (no === 11) indices.forEach((index) => { next[index] += 1; });
+    else if (no === 14) next[indices[0]] = ability.value;
+    else if (no === 17) indices.forEach((index) => { next[index] += 2; });
+    else if (no === 20) next.push(ability.value);
+    else return {ok:false, rolling:[...rolling]};
+    return {ok:true, rolling:next, rerolled:[1,9].includes(no), indices};
+  }
+
+  function recruitCompanion({no, player, players, dice}) {
+    if (!meetsRecruitCondition(no, dice, player)) return {ok:false, reason:'迎える条件を満たしていません'};
+    if (no !== 2 && player.cards.includes(no)) return {ok:false, reason:'すでに迎えている仲間です'};
+    const cards = [...player.cards];
+    if (no === 2) {
+      const lostIndex = cards.indexOf(1);
+      if (lostIndex < 0) return {ok:false, reason:'まいごのモモンガが必要です'};
+      cards.splice(lostIndex, 1);
+    }
+    cards.push(no);
+    const startsWishNight = no === 19;
+    const grantsMoonRabbit = startsWishNight && !players.some((member) => member.cards.includes(20));
+    if (grantsMoonRabbit) cards.push(20);
+    return {ok:true, cards, startsWishNight, grantsMoonRabbit};
+  }
+
+  function advanceTurn({turn, round, final, inFinalRounds, finalTurns, playerCount}) {
+    if (final && inFinalRounds) {
+      const completedTurns = finalTurns + 1;
+      if (completedTurns >= playerCount) return {finished:true, turn, round, finalTurns:completedTurns};
+      return {finished:false, turn:(turn + 1) % playerCount, round, finalTurns:completedTurns};
+    }
+    const nextTurn = turn + 1;
+    if (nextTurn >= playerCount) return {finished:false, turn:0, round:round + 1, finalTurns};
+    return {finished:false, turn:nextTurn, round, finalTurns};
+  }
+
+  function serializeState(state) {
+    return {
+      ...state,
+      selected:[...asSet(state.selected)],
+      players:(state.players || []).map((player) => ({...player, used:[...asSet(player.used)]})),
+      ability:state.ability ? {...state.ability, rolling:[...asSet(state.ability.rolling)], kept:[...asSet(state.ability.kept)]} : null
+    };
+  }
+
+  function hydrateState(state) {
+    return {
+      ...state,
+      selected:asSet(state.selected),
+      players:(state.players || []).map((player) => ({...player, used:asSet(player.used)})),
+      ability:state.ability ? {...state.ability, rolling:asSet(state.ability.rolling), kept:asSet(state.ability.kept)} : null
+    };
+  }
+
+  global.NanatsuboshiCore = Object.freeze({
+    CARDS,
+    CARD_CONDITIONS,
+    AUTO_CARDS,
+    FIXED_DIE_CARDS,
+    rollDie,
+    countFaces,
+    totalDice,
+    scoreDice,
+    meetsRecruitCondition,
+    eligibleCompanions,
+    baseDiceCount,
+    compareScores,
+    rankPlayers,
+    maxAbilityTargets,
+    canTargetAbilityDie,
+    abilityInstruction,
+    isAbilityReady,
+    abilityAvailability,
+    resolveAbility,
+    recruitCompanion,
+    advanceTurn,
+    serializeState,
+    hydrateState
+  });
+})(globalThis);
+
+  </script>
+  <script>
+/* Standalone solo play engine for ななつぼしの おねがい */
+(() => {
+  const root = document.getElementById('nanatsuboshi-flow');
+  if (!root) return;
+  const $ = (s, el=root) => el.querySelector(s);
+  const core = globalThis.NanatsuboshiCore;
+  if (!core) throw new Error('NanatsuboshiCore must load before solo-engine.js');
+  const cards = core.CARDS;
+  const cardConditions = core.CARD_CONDITIONS;
+  const faces = ['⚀','⚁','⚂','⚃','⚄','⚅'];
   const aiNames = ['森のAI','月のAI','木の実のAI','小川のAI'];
   const rnd = n => Math.floor(Math.random()*n);
-  const die = () => rnd(6)+1;
-  const countMap = a => a.reduce((m,v)=>(m[v]=(m[v]||0)+1,m),{});
-  const best = a => Object.entries(countMap(a)).map(([v,n])=>({v:+v,n})).sort((a,b)=>b.n-a.n||b.v-a.v)[0]||{v:0,n:0};
-  const total = a => a.reduce((x,y)=>x+y,0);
-  const hasN = (a,n) => best(a).n>=n;
-  const pairs = a => Object.values(countMap(a)).filter(n=>n>=2).length;
-  const fullHouse = a => { const x=Object.values(countMap(a)).sort((x,y)=>y-x); return x[0]>=3 && (x[1]>=2 || x[0]>=5); };
-  const straight5 = a => [1,2,3,4,5].every(v=>a.includes(v)) || [2,3,4,5,6].every(v=>a.includes(v));
-  const condition = (no,a,p) => {
-    if(no===1) return !p.cards.includes(1);
-    if(no===2) return p.cards.includes(1) && p.used.has(1);
-    if(no===3) return hasN(a,2);
-    if(no===4) return a.length>0&&a.every(v=>v%2===1);
-    if(no===5) return a.length>0&&a.every(v=>v%2===0);
-    if(no===6) return total(a)>=15;
-    if(no===7) return hasN(a,3);
-    if(no===8) return hasN(a,4);
-    if(no===9) return total(a)>=20;
-    if(no===10) return pairs(a)>=2 || hasN(a,4);
-    if(no===11) return fullHouse(a);
-    if(no===12) return total(a)>=30;
-    if(no===13) return hasN(a,5);
-    if(no===14) return straight5(a);
-    if(no===15) return [1,2,3,4,5,6].every(v=>a.includes(v));
-    if(no===16) { const c=Object.values(countMap(a)).sort((x,y)=>y-x); return (c[0]||0)+(c[1]||0)+(c[2]||0)>=6 && c.filter(x=>x>=2).length>=3 || hasN(a,6); }
-    if(no===17) { const c=Object.values(countMap(a)).filter(x=>x>=3); return c.length>=2 || hasN(a,6); }
-    if(no===18) return hasN(a,6);
-    if(no===19) return hasN(a,7);
-    return false;
-  };
+  const die = () => core.rollDie();
+  const best = core.scoreDice;
+  const total = core.totalDice;
   const style = document.createElement('style');
   style.textContent = `
     #nanatsuboshi-flow .solo-board{display:grid;gap:14px}.solo-panel{background:rgba(7,20,42,.88);border:1px solid rgba(255,225,139,.38);border-radius:18px;padding:14px;color:#fff}.solo-top{display:grid;grid-template-columns:.72fr .8fr 1fr 1.08fr;gap:6px;align-items:center;position:sticky;top:max(0px,env(safe-area-inset-top));z-index:4;background:rgba(4,13,30,.96);padding:8px;border-radius:14px}.solo-top .btn{min-width:0;padding-inline:5px;white-space:nowrap}.solo-turn-panel{display:grid;gap:10px}.solo-turn-head{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}.solo-turns{display:flex;gap:6px;overflow-x:auto;padding-bottom:2px}.solo-person{white-space:nowrap;border:1px solid rgba(255,255,255,.25);border-radius:999px;background:#132b4d;color:#fff;padding:8px 11px}.solo-person[aria-current=true]{background:#f3c965;color:#14233b;font-weight:800}.solo-ai-settings{display:flex;align-items:center;gap:8px;padding-top:2px}.solo-ai-settings select{min-height:38px;max-width:112px}.solo-ai-settings label{display:flex;align-items:center;gap:4px;font-size:13px}.solo-dice{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;min-height:56px}.solo-die{width:50px;height:50px;border-radius:12px;border:2px solid #f0d485;background:#fff8dd;color:#172949;font-size:34px;line-height:1}.solo-die.selected,.solo-die.ability-target{transform:translateY(-5px);box-shadow:0 0 0 3px #78d8ff}.solo-die.kept{background:#f3c965;border-color:#fff0b6}.solo-die.ability-disabled{opacity:.38}.solo-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px}.solo-ability-tool{display:grid;gap:10px;margin:12px 0;padding:12px;border:2px solid #ffd667;border-radius:14px;background:rgba(255,214,103,.12);box-shadow:0 0 18px rgba(255,214,103,.2)}.solo-ability-tool strong{color:#ffe59b}.solo-ability-values{display:flex;flex-wrap:wrap;gap:7px;justify-content:center}.solo-value{min-width:44px;min-height:44px;border-radius:11px;border:1px solid #ffe59b;background:#fff8dd;color:#162743;font-size:20px;font-weight:800}.solo-value[aria-pressed=true]{background:#ffd667;box-shadow:0 0 0 3px rgba(255,214,103,.25)}.solo-split{display:flex;gap:7px;justify-content:center}.solo-split select{min-width:64px;min-height:44px}.solo-log{max-height:150px;overflow:auto;font-size:13px;line-height:1.55;background:rgba(0,0,0,.2);border-radius:12px;padding:9px}.solo-cards{display:grid;gap:6px}.solo-card{display:block;width:100%;text-align:left;background:rgba(255,255,255,.09);color:#fff;border:1px solid rgba(255,255,255,.2);border-radius:12px;padding:12px}.solo-card.auto-active,.solo-card.can-use,.solo-card.using{border:2px solid #ffd667;background:rgba(255,214,103,.14);box-shadow:0 0 0 2px rgba(255,214,103,.12),0 0 18px rgba(255,214,103,.3);animation:soloGlow 1.6s ease-in-out infinite alternate}.solo-card.auto-active small,.solo-card.can-use small,.solo-card.using small{color:#fff1b8}.solo-card.used-card{opacity:.62}.solo-card small{display:block;color:#e7e2d5;margin-top:4px}.solo-card:after{content:'カードを見る ›';display:block;margin-top:5px;color:#ffe59b;font-size:12px}.solo-recruits{display:grid;gap:7px}.solo-recruits .solo-card:after{content:'カードを見て選ぶ ›'}.solo-status{color:#ffe59b;font-weight:700}.solo-ability-note.ready{padding:10px;border:2px solid #ffd667;border-radius:12px;background:rgba(255,214,103,.14);color:#fff1b8;box-shadow:0 0 18px rgba(255,214,103,.3)}.solo-modal-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding-top:12px}.solo-modal-actions .btn{min-height:48px}.solo-turn-notice{position:fixed;left:50%;top:50%;z-index:9999;transform:translate(-50%,-50%) scale(.92);min-width:min(78vw,320px);padding:24px 18px;border:2px solid #ffe59b;border-radius:20px;background:rgba(5,18,38,.96);box-shadow:0 0 36px rgba(255,214,103,.42);color:#fff7d6;text-align:center;font-size:clamp(24px,7vw,34px);font-weight:800;letter-spacing:.05em;pointer-events:none;opacity:0;animation:soloTurnNotice 1.45s ease both}.solo-hidden{display:none!important}@keyframes soloGlow{to{box-shadow:0 0 0 3px rgba(255,214,103,.18),0 0 26px rgba(255,214,103,.52)}}@keyframes soloTurnNotice{0%{opacity:0;transform:translate(-50%,-50%) scale(.92)}18%,62%{opacity:1;transform:translate(-50%,-50%) scale(1)}100%{opacity:0;transform:translate(-50%,-50%) scale(1.03)}}@media(prefers-reduced-motion:reduce){.solo-card.auto-active,.solo-card.can-use,.solo-card.using{animation:none}.solo-turn-notice{animation-duration:.8s}}@media(max-width:430px){.solo-top{grid-template-columns:.7fr .82fr .98fr 1.08fr}.solo-top .btn{font-size:12px}.solo-turn-head{display:grid}.solo-ai-settings{justify-content:flex-start}.solo-die{width:46px;height:46px}.solo-actions{grid-template-columns:1fr}}
@@ -2044,14 +2275,9 @@
   const selectScreen = name => root.querySelectorAll('[data-screen]').forEach(s=>s.hidden=s.dataset.screen!==name);
   const log = msg => { if(!S)return; S.logs.push(msg); S.logs=S.logs.slice(-12); };
   const art = no => { const t=$('.card-art-library'); const i=t&&t.content.querySelector(`[data-card-art-no="${String(no).padStart(2,'0')}"]`); return i?i.getAttribute('src'):''; };
-  const baseDice = p => 3 + p.cards.filter(x=>x===2).length + (p.cards.includes(3)?1:0) + (p.cards.includes(18)?2:0);
-  const eligible = (p,a) => {
-    const list=[];
-    for(let no=2;no<=19;no++) if(condition(no,a,p) && (!p.cards.includes(no)||no===2)) list.push(no);
-    if(!list.length && !p.cards.includes(1)) list.push(1);
-    return list;
-  };
-  const playerStatus = p => ({name:p.name,avatar:p.ai?'AI':p.name.slice(0,1),type:p.ai?'AIプレイヤー':'プレイヤー',order:S.players.indexOf(p)+1,dice:baseDice(p),current:S.players[S.turn]===p,wish:p.wish,cards:p.cards.map(no=>({no:String(no).padStart(2,'0'),status:p.used.has(no)?'使用ずみ':([2,3,18].includes(no)?'自動':'つかえる')}))});
+  const baseDice = core.baseDiceCount;
+  const eligible = core.eligibleCompanions;
+  const playerStatus = p => ({name:p.name,avatar:p.ai?'AI':p.name.slice(0,1),type:p.ai?'AIプレイヤー':'プレイヤー',order:S.players.indexOf(p)+1,dice:baseDice(p),current:S.players[S.turn]===p,wish:p.wish,cards:p.cards.map(no=>({no:String(no).padStart(2,'0'),status:p.used.has(no)?'使用ずみ':(core.AUTO_CARDS.includes(no)?'自動':'つかえる')}))});
   const syncExistingPlayerStates = () => { if(!S)return; S.players.forEach((p,i)=>{ const id='solo-'+i; p.id=id; }); };
 
   function setupGame(){
@@ -2095,7 +2321,7 @@
     $('.solo-ability-slot').innerHTML=renderAbilityTool();
     $('.solo-roll').disabled=p.ai||S.phase!=='roll'||S.rolled||!!S.ability;
     $('.solo-keep').disabled=p.ai||S.phase!=='roll'||!S.rolled||S.selected.size===0||!!S.ability;
-    $('.solo-cards').innerHTML=p.cards.map(no=>{const auto=[2,3,18].includes(no),using=S.ability?.no===no,used=p.used.has(no),available=!auto&&!used&&!S.ability&&abilityAvailability(no).ok;const cls=using?'using':auto?'auto-active':available?'can-use':used?'used-card':'';const state=using?'（このちからを使用中）':auto?'（自動で発動中）':available?'（今なら使用できます）':used?'（この手番で使用ずみ）':'';return `<button class="solo-card ${cls}" data-owned="${no}"><strong>No.${String(no).padStart(2,'0')} ${cards[no][0]}</strong><small>${cards[no][1]}${state?`<br>${state}`:''}</small></button>`;}).join('');
+    $('.solo-cards').innerHTML=p.cards.map(no=>{const auto=core.AUTO_CARDS.includes(no),using=S.ability?.no===no,used=p.used.has(no),available=!auto&&!used&&!S.ability&&abilityAvailability(no).ok;const cls=using?'using':auto?'auto-active':available?'can-use':used?'used-card':'';const state=using?'（このちからを使用中）':auto?'（自動で発動中）':available?'（今なら使用できます）':used?'（この手番で使用ずみ）':'';return `<button class="solo-card ${cls}" data-owned="${no}"><strong>No.${String(no).padStart(2,'0')} ${cards[no][0]}</strong><small>${cards[no][1]}${state?`<br>${state}`:''}</small></button>`;}).join('');
     const opts=S.phase==='recruit'?eligible(p,S.kept):[];
     if(S.phase==='final-complete')$('.solo-recruits').innerHTML=`<div class="solo-status">最後の星座：「${p.score?.v||'-'}」が${p.score?.n||0}個</div>${p.ai?'':`<button class="btn btn-primary solo-final-submit" type="button">最後の願いを 届ける</button>`}`;
     else{$('.solo-recruits').innerHTML=opts.length?opts.map(no=>`<button class="solo-card" data-recruit="${no}"><strong>No.${String(no).padStart(2,'0')} ${cards[no][0]}</strong><small>迎える方法：${cardConditions[no]}</small></button>`).join(''):`<span class="text-muted">${S.phase==='recruit'?'迎えられる仲間はいません':'星をすべて決めると表示されます'}</span>`;if(S.phase==='recruit')$('.solo-recruits').insertAdjacentHTML('beforeend','<button class="btn solo-pass">迎えずに手番を終える</button>');}
@@ -2144,14 +2370,10 @@
     if(S.final&&S.inFinalRounds){S.phase='final-complete';log(`${p.name}の最後の星座が完成しました。`);update();if(p.ai)timer=setTimeout(endTurn,aiDelay());return;}
     S.phase='recruit';update();
   }
-  const maxAbilityTargets=no=>[1,4,10,14].includes(no)?1:no===5?2:no===15?3:99;
+  const maxAbilityTargets=core.maxAbilityTargets;
   function canSelectAbilityRolling(no,i){
     if(!S?.ability||S.ability.locked)return false;
-    const v=S.rolling[i];
-    if(no===4&&v>=6)return false;
-    if(no===11&&v>=6)return false;
-    if(no===17&&v>=5)return false;
-    return true;
+    return core.canTargetAbilityDie(no,S.rolling[i]);
   }
   function toggleAbilityTarget(kind,i){
     const a=S.ability;if(!a||a.locked)return;const set=a[kind];
@@ -2159,19 +2381,9 @@
     if([5,15].includes(a.no)){const idx=[...a.rolling].sort((x,y)=>x-y);a.values=idx.map(x=>S.rolling[x]);}
     update();
   }
-  function abilityInstruction(no){
-    return ({1:'振り直す「ころがし中の星」を1個選んでね。',4:'増やす星を1個選び、増やす数を選んでね。',5:'配分し直す星を2個選び、合計が同じになる新しい目を決めてね。',9:'振り直す「ころがし中の星」を1個以上選んでね。',10:'変える「ころがし中の星」と、まねする「決めた星」を1個ずつ選んでね。',11:'1増やす「ころがし中の星」を1個以上選んでね。',14:'変える星を1個選び、新しい目を選んでね。',15:'作り直す星を3個選び、合計が同じになる新しい目を決めてね。',17:'2増やす「ころがし中の星」を1個以上選んでね。',20:'追加する星の目を選んでね。'})[no]||'対象を選んでね。';
-  }
+  const abilityInstruction=core.abilityInstruction;
   function abilityReady(){
-    const a=S?.ability;if(!a||a.locked)return false;const n=a.rolling.size;
-    if(a.no===1)return n===1;
-    if(a.no===4){const i=[...a.rolling][0];return n===1&&a.value>=1&&a.value<=3&&S.rolling[i]+a.value<=6;}
-    if(a.no===5||a.no===15){const need=a.no===5?2:3,idx=[...a.rolling];return n===need&&a.values?.length===need&&a.values.every(v=>v>=1&&v<=6)&&total(a.values)===total(idx.map(i=>S.rolling[i]));}
-    if(a.no===9||a.no===11||a.no===17)return n>=1;
-    if(a.no===10)return n===1&&a.kept.size===1;
-    if(a.no===14)return n===1&&a.value>=1&&a.value<=6;
-    if(a.no===20)return a.value>=1&&a.value<=6;
-    return false;
+    return core.isAbilityReady({ability:S?.ability,rolling:S?.rolling||[],kept:S?.kept||[]});
   }
   function renderAbilityTool(){
     const a=S?.ability;if(!a)return '';
@@ -2182,7 +2394,7 @@
   }
   function beginAbility(no){
     const available=abilityAvailability(no);if(!available.ok)return false;
-    const fixed={6:1,7:2,8:3,12:4,13:5,16:6};
+    const fixed=core.FIXED_DIE_CARDS;
     if(fixed[no]){S.rolling.push(fixed[no]);finishAbility(no,`「${fixed[no]}」の星を1個追加しました。`);return true;}
     S.selected.clear();S.ability={no,rolling:new Set(),kept:new Set(),value:null,values:[],locked:false};update();$('.solo-dice-panel')?.scrollIntoView({behavior:'smooth',block:'center'});return true;
   }
@@ -2190,57 +2402,35 @@
     S.players[S.turn].used.add(no);S.ability=null;log(`${cards[no][0]}のちからを使いました。${detail||''}`);update();
   }
   function animateAbilityReroll(no,indices){
-    const before=indices.map(i=>S.rolling[i]);S.ability.locked=true;let ticks=0;
-    const id=setInterval(()=>{indices.forEach(i=>S.rolling[i]=die());update();if(++ticks>=6){clearInterval(id);const after=indices.map(i=>S.rolling[i]);finishAbility(no,`${before.join('・')} → ${after.join('・')}。`);}},70);
+    const before=indices.map(i=>S.rolling[i]);const result=core.resolveAbility({ability:S.ability,rolling:S.rolling,kept:S.kept});if(!result.ok)return false;const settled=result.rolling;S.ability.locked=true;let ticks=0;
+    const id=setInterval(()=>{indices.forEach(i=>S.rolling[i]=die());update();if(++ticks>=6){clearInterval(id);S.rolling=settled;const after=indices.map(i=>S.rolling[i]);finishAbility(no,`${before.join('・')} → ${after.join('・')}。`);}},70);return true;
   }
   function applyAbility(){
     if(!abilityReady())return false;const a=S.ability,no=a.no,idx=[...a.rolling].sort((x,y)=>x-y);
     if(no===1||no===9){animateAbilityReroll(no,idx);return true;}
-    if(no===4)S.rolling[idx[0]]+=a.value;
-    else if(no===5||no===15)idx.forEach((at,i)=>S.rolling[at]=a.values[i]);
-    else if(no===10)S.rolling[idx[0]]=S.kept[[...a.kept][0]];
-    else if(no===11)idx.forEach(i=>S.rolling[i]++);
-    else if(no===14)S.rolling[idx[0]]=a.value;
-    else if(no===17)idx.forEach(i=>S.rolling[i]+=2);
-    else if(no===20)S.rolling.push(a.value);
-    else return false;
+    const result=core.resolveAbility({ability:a,rolling:S.rolling,kept:S.kept});if(!result.ok)return false;S.rolling=result.rolling;
     finishAbility(no,'選んだ星に効果を反映しました。');return true;
   }
   function abilityAvailability(no){
-    if(!S) return {ok:false,label:'ゲーム中に使えます'};
+    if(!S)return {ok:false,label:'ゲーム中に使えます'};
     const p=S.players[S.turn];
-    if(p.ai) return {ok:false,label:'AIの手番です'};
-    if([2,3,18].includes(no)) return {ok:false,label:'手番開始時に自動で発動します'};
-    if(no===19) return {ok:false,label:'仲間を迎えるときに使います'};
-    if(p.used.has(no)) return {ok:false,label:'この手番では使用ずみ'};
-    if(S.ability) return {ok:false,label:S.ability.no===no?'このちからを発動中':'別の仲間のちからを使用中'};
-    if(S.phase!=='roll') return {ok:false,label:'星を決め終える前に使えます'};
-    if(!S.rolled) return {ok:false,label:'星を振ったあとに使えます'};
-    if(!S.rolling.length && no!==20) return {ok:false,label:'ころがし中の星が必要です'};
-    if(no===5 && S.rolling.length<2) return {ok:false,label:'ころがし中の星が2個必要です'};
-    if(no===10 && !S.kept.length) return {ok:false,label:'決めた星が1個必要です'};
-    if(no===15 && S.rolling.length<3) return {ok:false,label:'ころがし中の星が3個必要です'};
-    if(no===4 && !S.rolling.some(v=>v<6)) return {ok:false,label:'増やせる星（1〜5）が必要です'};
-    if(no===11 && !S.rolling.some(v=>v<6)) return {ok:false,label:'増やせる星（1〜5）が必要です'};
-    if(no===17 && !S.rolling.some(v=>v<=4)) return {ok:false,label:'2増やせる星（1〜4）が必要です'};
-    return {ok:true,label:'このちからを使う'};
+    return core.abilityAvailability(no,{phase:S.phase,rolled:S.rolled,rolling:S.rolling,kept:S.kept,ability:S.ability},p);
   }
   function recruit(no){
     const p=S.players[S.turn];
-    if(no===2){const i=p.cards.indexOf(1);if(i<0)return;p.cards.splice(i,1);}
-    if(no!==2 && p.cards.includes(no)) return;
-    p.cards.push(no); log(`${p.name}が「${cards[no][0]}」を迎えました。`);
-    if(no===19){if(!S.players.some(x=>x.cards.includes(20)))p.cards.push(20);showWishNightIntro(p);return;}
+    const result=core.recruitCompanion({no,player:p,players:S.players,dice:S.kept});if(!result.ok)return;
+    p.cards=result.cards;log(`${p.name}が「${cards[no][0]}」を迎えました。`);
+    if(result.startsWishNight){showWishNightIntro(p);return;}
     endTurn();
   }
   function endTurn(){
-    if(S.final&&S.inFinalRounds){S.finalTurns++;if(S.finalTurns>=S.players.length){finish();return;}S.turn=(S.turn+1)%S.players.length;startTurn();return;}
-    S.turn++;if(S.turn>=S.players.length){S.turn=0;S.round++;}
+    const next=core.advanceTurn({turn:S.turn,round:S.round,final:S.final,inFinalRounds:S.inFinalRounds,finalTurns:S.finalTurns,playerCount:S.players.length});
+    S.turn=next.turn;S.round=next.round;S.finalTurns=next.finalTurns;if(next.finished){finish();return;}
     startTurn();
   }
   function showWishNightIntro(holder){
     S.final=true;S.inFinalRounds=false;S.finalTurns=0;S.finalStarter=S.turn;clearTimeout(timer);log('願いの夜が始まります！');
-    const currentBest=[...S.players].sort((a,b)=>(b.score?.n||0)-(a.score?.n||0)||(b.score?.v||0)-(a.score?.v||0))[0];
+    const currentBest=core.rankPlayers(S.players)[0];
     wishScreen.innerHTML=`<span class="paint paint-b"></span><div class="screen-head"><span class="viz-badge">最終ラウンド</span><span class="text-small">月ウサギ：${holder.name}</span></div><h2 class="text-center">願いの夜</h2>${wishNightArt?`<img class="wish-night-illustration" src="${wishNightArt}" alt="願いの流れ星と月ウサギ">`:''}<div class="best-record"><span class="text-small text-muted">いま一番強い星座</span><strong>「${currentBest?.score?.v||'-'}」が${currentBest?.score?.n||0}個</strong><span class="text-small">${holder.name}が願いの流れ星を呼びました</span></div><div class="card"><h3>最後の願いを届けよう</h3><p>ここから全員が1回ずつ、最後の手番を行います。仲間のちからを使い、一番多く同じ目をそろえたプレイヤーのお願いが叶います。</p><p class="text-small text-muted">同じ個数なら、そろえた目が大きいほうが上位です。</p></div><button class="btn btn-primary btn-block solo-start-wish" type="button">願いの夜を はじめる</button>`;
     selectScreen('wish');
   }
@@ -2252,7 +2442,7 @@
     loop();
   }
   function finish(){
-    const rank=[...S.players].sort((a,b)=>(b.score?.n||0)-(a.score?.n||0)||(b.score?.v||0)-(a.score?.v||0)); S.winner=rank[0];
+    const rank=core.rankPlayers(S.players);S.winner=rank[0];
     selectScreen('result'); const title=$('.result-title',resultScreen),wish=$('.result-wish',resultScreen),strip=$('.ability-strip',resultScreen),constellation=$('.result-constellation',resultScreen);
     if(title)title.innerHTML=`${S.winner.name}のお願いが<br>流れ星に届きました！`;if(wish)wish.textContent=`「${S.winner.wish}」`;
     if(constellation)constellation.textContent=`最後の星座：「${S.winner.score?.v||'-'}」が${S.winner.score?.n||0}個`;
@@ -2260,7 +2450,7 @@
   }
   function openStaticDialog(selector){const d=$(selector);if(!d)return;typeof d.showModal==='function'?d.showModal():d.setAttribute('open','');}
   function cardTiming(no){
-    if([2,3,18].includes(no))return '自分の手番開始時に自動で発動。';
+    if(core.AUTO_CARDS.includes(no))return '自分の手番開始時に自動で発動。';
     if(no===19)return '迎えたときに「願いの夜」が始まります。';
     if(no===10)return '星を振ったあと、決めた星が1個以上あるとき。1手番につき1回。';
     return '星を振ったあと、すべての星を決め終える前。1手番につき1回。';
