@@ -1210,7 +1210,7 @@
         <span class="viz-badge">お願いがかないました</span>
         <h2 class="result-title">げんたのお願いが<br>流れ星に届きました！</h2>
         <p class="result-wish">「森のみんなと、いつまでも仲よく暮らせますように」</p>
-        <p>最後の星座：「6」が8個</p>
+        <p class="result-constellation">最後の星座：「6」が8個</p>
       </div>
       <div class="ability-strip" aria-label="最終結果">
         <div class="ability"><span>1位　げんた</span><strong>6 × 8</strong></div>
@@ -1219,8 +1219,8 @@
         <div class="ability"><span>4位　月のAI</span><strong>4 × 6</strong></div>
       </div>
       <div class="result-actions">
-        <button class="btn btn-primary btn-block" type="button">同じメンバーで もういちど</button>
-        <button class="btn btn-block" type="button">タイトルへ</button>
+        <button class="btn btn-primary btn-block result-restart" type="button">同じメンバーで もういちど</button>
+        <button class="btn btn-block result-to-title" type="button">タイトルへ</button>
       </div>
     </div>
 
@@ -2038,7 +2038,9 @@
 
   let S=null, timer=null, aiOpponentCount=2, cardContext=null;
   const gameScreen = $('.game-screen');
+  const wishScreen = $('[data-screen="wish"]');
   const resultScreen = $('[data-screen="result"]');
+  const wishNightArt = $('.wish-night-illustration',wishScreen)?.getAttribute('src')||'';
   const selectScreen = name => root.querySelectorAll('[data-screen]').forEach(s=>s.hidden=s.dataset.screen!==name);
   const log = msg => { if(!S)return; S.logs.push(msg); S.logs=S.logs.slice(-12); };
   const art = no => { const t=$('.card-art-library'); const i=t&&t.content.querySelector(`[data-card-art-no="${String(no).padStart(2,'0')}"]`); return i?i.getAttribute('src'):''; };
@@ -2059,7 +2061,7 @@
     const ps=[{name,wish,ai:false,cards:[1],used:new Set(),score:null}];
     for(let i=0;i<n-1;i++) ps.push({name:aiNames[i],wish:'森のみんなの願いが叶いますように',ai:true,cards:[1],used:new Set(),score:null});
     for(let i=ps.length-1;i>0;i--){const j=rnd(i+1);[ps[i],ps[j]]=[ps[j],ps[i]];}
-    S={players:ps,turn:0,round:1,rolling:[],kept:[],selected:new Set(),rolled:false,phase:'roll',ability:null,logs:[],final:false,finalTurns:0,winner:null};
+    S={players:ps,turn:0,round:1,rolling:[],kept:[],selected:new Set(),rolled:false,phase:'roll',ability:null,logs:[],final:false,inFinalRounds:false,finalTurns:0,finalStarter:0,winner:null};
     syncExistingPlayerStates(); log('プレイ順をランダムに決めました。'); renderBoard(); startTurn();
   }
 
@@ -2087,7 +2089,7 @@
     $('.solo-round').textContent=S.final?'願いの夜':`ラウンド ${S.round}`;
     $('.solo-turns').innerHTML=S.players.map((x,i)=>`<button class="solo-person" data-person="${i}" ${i===S.turn?'aria-current="true"':''}>${i+1} ${x.name}</button>`).join('');
     $('.solo-status').textContent=`${p.name}の番`;
-    $('.solo-phase').textContent=p.ai?'森のAIが星を選んでいます…':S.ability?`${cards[S.ability.no][0]}の対象を選んでね`:S.phase==='recruit'?'迎える仲間を選んでね':S.rolled?'星を1個以上選び「決める」を押してね':'すべての星を振ってね';
+    $('.solo-phase').textContent=p.ai?'森のAIが星を選んでいます…':S.phase==='final-complete'?'最後の星座が完成しました':S.ability?`${cards[S.ability.no][0]}の対象を選んでね`:S.phase==='recruit'?'迎える仲間を選んでね':S.rolled?'星を1個以上選び「決める」を押してね':'すべての星を振ってね';
     $('.solo-rolling').innerHTML=S.rolling.map((v,i)=>{const target=S.ability?.rolling.has(i),disabled=S.ability&&!canSelectAbilityRolling(S.ability.no,i)&&!target;return `<button class="solo-die ${S.ability?(target?'ability-target':''):(S.selected.has(i)?'selected':'')} ${disabled?'ability-disabled':''}" data-die="${i}" ${p.ai||disabled?'disabled':''} aria-label="ころがし中の星 ${v}">${faces[v-1]}</button>`;}).join('')||'<span class="text-muted">ありません</span>';
     $('.solo-kept').innerHTML=S.kept.map((v,i)=>`<button class="solo-die kept ${S.ability?.kept.has(i)?'ability-target':''}" ${S.ability?.no===10?`data-kept="${i}"`:'disabled'} aria-label="決めた星 ${v}">${faces[v-1]}</button>`).join('')||'<span class="text-muted">まだありません</span>';
     $('.solo-ability-slot').innerHTML=renderAbilityTool();
@@ -2095,8 +2097,8 @@
     $('.solo-keep').disabled=p.ai||S.phase!=='roll'||!S.rolled||S.selected.size===0||!!S.ability;
     $('.solo-cards').innerHTML=p.cards.map(no=>{const auto=[2,3,18].includes(no),using=S.ability?.no===no,used=p.used.has(no),available=!auto&&!used&&!S.ability&&abilityAvailability(no).ok;const cls=using?'using':auto?'auto-active':available?'can-use':used?'used-card':'';const state=using?'（このちからを使用中）':auto?'（自動で発動中）':available?'（今なら使用できます）':used?'（この手番で使用ずみ）':'';return `<button class="solo-card ${cls}" data-owned="${no}"><strong>No.${String(no).padStart(2,'0')} ${cards[no][0]}</strong><small>${cards[no][1]}${state?`<br>${state}`:''}</small></button>`;}).join('');
     const opts=S.phase==='recruit'?eligible(p,S.kept):[];
-    $('.solo-recruits').innerHTML=opts.length?opts.map(no=>`<button class="solo-card" data-recruit="${no}"><strong>No.${String(no).padStart(2,'0')} ${cards[no][0]}</strong><small>迎える方法：${cardConditions[no]}</small></button>`).join(''):`<span class="text-muted">${S.phase==='recruit'?'迎えられる仲間はいません':'星をすべて決めると表示されます'}</span>`;
-    if(S.phase==='recruit') $('.solo-recruits').insertAdjacentHTML('beforeend','<button class="btn solo-pass">迎えずに手番を終える</button>');
+    if(S.phase==='final-complete')$('.solo-recruits').innerHTML=`<div class="solo-status">最後の星座：「${p.score?.v||'-'}」が${p.score?.n||0}個</div>${p.ai?'':`<button class="btn btn-primary solo-final-submit" type="button">最後の願いを 届ける</button>`}`;
+    else{$('.solo-recruits').innerHTML=opts.length?opts.map(no=>`<button class="solo-card" data-recruit="${no}"><strong>No.${String(no).padStart(2,'0')} ${cards[no][0]}</strong><small>迎える方法：${cardConditions[no]}</small></button>`).join(''):`<span class="text-muted">${S.phase==='recruit'?'迎えられる仲間はいません':'星をすべて決めると表示されます'}</span>`;if(S.phase==='recruit')$('.solo-recruits').insertAdjacentHTML('beforeend','<button class="btn solo-pass">迎えずに手番を終える</button>');}
     $('.solo-log').innerHTML=S.logs.map(x=>`<div>・${x}</div>`).join(''); $('.solo-log').scrollTop=9999;
   }
 
@@ -2130,13 +2132,18 @@
     const person=e.target.closest('[data-person]'); if(person){openPlayer(+person.dataset.person);return;}
     const owned=e.target.closest('[data-owned]'); if(owned){openCard(+owned.dataset.owned,'owned');return;}
     const rec=e.target.closest('[data-recruit]'); if(rec){openCard(+rec.dataset.recruit,'recruit');return;}
+    if(e.target.closest('.solo-final-submit')){endTurn();return;}
     if(e.target.closest('.solo-pass')) endTurn();
   }
   function boardChange(e){
     if(!S?.ability||!e.target.matches('[data-split-index]'))return;
     S.ability.values[+e.target.dataset.splitIndex]=+e.target.value;update();
   }
-  function beginRecruit(){ S.phase='recruit'; const b=best(S.kept); S.players[S.turn].score={...b}; log(`星の結果は「${b.v}」が${b.n}個。`); update(); }
+  function beginRecruit(){
+    const b=best(S.kept),p=S.players[S.turn];p.score={...b};log(`星の結果は「${b.v}」が${b.n}個。`);
+    if(S.final&&S.inFinalRounds){S.phase='final-complete';log(`${p.name}の最後の星座が完成しました。`);update();if(p.ai)timer=setTimeout(endTurn,aiDelay());return;}
+    S.phase='recruit';update();
+  }
   const maxAbilityTargets=no=>[1,4,10,14].includes(no)?1:no===5?2:no===15?3:99;
   function canSelectAbilityRolling(no,i){
     if(!S?.ability||S.ability.locked)return false;
@@ -2223,24 +2230,32 @@
     if(no===2){const i=p.cards.indexOf(1);if(i<0)return;p.cards.splice(i,1);}
     if(no!==2 && p.cards.includes(no)) return;
     p.cards.push(no); log(`${p.name}が「${cards[no][0]}」を迎えました。`);
-    if(no===19){S.final=true;if(!S.players.some(x=>x.cards.includes(20)))p.cards.push(20);log('願いの夜が始まります！');}
+    if(no===19){if(!S.players.some(x=>x.cards.includes(20)))p.cards.push(20);showWishNightIntro(p);return;}
     endTurn();
   }
   function endTurn(){
-    if(S.final){S.finalTurns++;if(S.finalTurns>=S.players.length){finish();return;}}
+    if(S.final&&S.inFinalRounds){S.finalTurns++;if(S.finalTurns>=S.players.length){finish();return;}S.turn=(S.turn+1)%S.players.length;startTurn();return;}
     S.turn++;if(S.turn>=S.players.length){S.turn=0;S.round++;}
     startTurn();
   }
+  function showWishNightIntro(holder){
+    S.final=true;S.inFinalRounds=false;S.finalTurns=0;S.finalStarter=S.turn;clearTimeout(timer);log('願いの夜が始まります！');
+    const currentBest=[...S.players].sort((a,b)=>(b.score?.n||0)-(a.score?.n||0)||(b.score?.v||0)-(a.score?.v||0))[0];
+    wishScreen.innerHTML=`<span class="paint paint-b"></span><div class="screen-head"><span class="viz-badge">最終ラウンド</span><span class="text-small">月ウサギ：${holder.name}</span></div><h2 class="text-center">願いの夜</h2>${wishNightArt?`<img class="wish-night-illustration" src="${wishNightArt}" alt="願いの流れ星と月ウサギ">`:''}<div class="best-record"><span class="text-small text-muted">いま一番強い星座</span><strong>「${currentBest?.score?.v||'-'}」が${currentBest?.score?.n||0}個</strong><span class="text-small">${holder.name}が願いの流れ星を呼びました</span></div><div class="card"><h3>最後の願いを届けよう</h3><p>ここから全員が1回ずつ、最後の手番を行います。仲間のちからを使い、一番多く同じ目をそろえたプレイヤーのお願いが叶います。</p><p class="text-small text-muted">同じ個数なら、そろえた目が大きいほうが上位です。</p></div><button class="btn btn-primary btn-block solo-start-wish" type="button">願いの夜を はじめる</button>`;
+    selectScreen('wish');
+  }
+  function startWishNight(){S.inFinalRounds=true;S.finalTurns=0;S.turn=S.finalStarter;selectScreen('game');startTurn();}
   function aiTurn(){
     const p=S.players[S.turn]; let rolling=[...S.rolling], kept=[];
-    const loop=()=>{ if(!rolling.length){S.rolling=[];S.kept=kept;beginRecruit();timer=setTimeout(()=>{const o=eligible(p,kept); if(o.length)recruit(Math.max(...o));else endTurn();},aiDelay());return;}
+    const loop=()=>{ if(!rolling.length){S.rolling=[];S.kept=kept;beginRecruit();if(S.final&&S.inFinalRounds)return;timer=setTimeout(()=>{const o=eligible(p,kept); if(o.length)recruit(Math.max(...o));else endTurn();},aiDelay());return;}
       rolling=rolling.map(die); const target=best([...kept,...rolling]).v||6; let take=rolling.filter(v=>v===target); if(!take.length)take=[Math.max(...rolling)]; take.forEach(v=>{const i=rolling.indexOf(v);kept.push(v);rolling.splice(i,1);}); S.rolling=[...rolling];S.kept=[...kept];S.rolled=true;log(`${p.name}が${take.length}個の星を決めました。`);update();timer=setTimeout(loop,aiDelay());};
     loop();
   }
   function finish(){
     const rank=[...S.players].sort((a,b)=>(b.score?.n||0)-(a.score?.n||0)||(b.score?.v||0)-(a.score?.v||0)); S.winner=rank[0];
-    selectScreen('result'); const title=$('.result-title',resultScreen),wish=$('.result-wish',resultScreen),strip=$('.ability-strip',resultScreen);
+    selectScreen('result'); const title=$('.result-title',resultScreen),wish=$('.result-wish',resultScreen),strip=$('.ability-strip',resultScreen),constellation=$('.result-constellation',resultScreen);
     if(title)title.innerHTML=`${S.winner.name}のお願いが<br>流れ星に届きました！`;if(wish)wish.textContent=`「${S.winner.wish}」`;
+    if(constellation)constellation.textContent=`最後の星座：「${S.winner.score?.v||'-'}」が${S.winner.score?.n||0}個`;
     if(strip)strip.innerHTML=rank.map((p,i)=>`<div class="ability"><span>${i+1}位　${p.name}</span><strong>${p.score?.v||'-'} × ${p.score?.n||0}</strong></div>`).join('');
   }
   function openStaticDialog(selector){const d=$(selector);if(!d)return;typeof d.showModal==='function'?d.showModal():d.setAttribute('open','');}
@@ -2265,6 +2280,9 @@
     typeof d.showModal==='function'?d.showModal():d.setAttribute('open','');
   }
   root.addEventListener('click',e=>{
+    if(e.target.closest('.solo-start-wish')){startWishNight();return;}
+    if(e.target.closest('.result-restart')){clearTimeout(timer);setupGame();return;}
+    if(e.target.closest('.result-to-title')){clearTimeout(timer);S=null;selectScreen('title');return;}
     const quickCard=e.target.closest('.quickref-card-open');if(quickCard){cardContext=null;window.setTimeout(()=>{$('.card-detail-body')?.querySelector('.solo-modal-actions')?.remove();$('.card-detail-body')?.querySelector('.solo-ability-note')?.remove();},0);return;}
     const c=e.target.closest('[data-modal-card]');if(c){const d=$('.player-dialog');if(d.open)d.close();openCard(+c.dataset.modalCard,'view');return;}
     if(e.target.closest('.solo-confirm-recruit')&&cardContext){const no=cardContext.no;const d=$('.companion-dialog');if(d.open)d.close();recruit(no);return;}
