@@ -1226,6 +1226,7 @@
         <button class="btn btn-block quickref-open" type="button"><i data-lucide="paw-print" aria-hidden="true"></i> 森のどうぶつたち</button>
         <button class="btn btn-primary btn-block room-entry" type="button" data-room-mode="create"><i data-lucide="sparkles" aria-hidden="true"></i> ルームを つくる</button>
         <button class="btn btn-block room-entry" type="button" data-room-mode="join"><i data-lucide="log-in" aria-hidden="true"></i> ルームに はいる</button>
+        <p class="text-small text-muted text-center" aria-label="ゲームの版">修正版 2026.08.26-2</p>
       </div>
     </div>
 
@@ -2717,6 +2718,7 @@
       const AudioContext = window.AudioContext || window.webkitAudioContext;
       if (soundEnabled && AudioContext) {
         context = new AudioContext();
+        if (context.state === 'suspended') void context.resume().catch(() => {});
         const sparkle = () => tone(context, 650 + Math.random() * 520, .075, .025);
         sparkle();
         soundTimer = window.setInterval(sparkle, 82);
@@ -23500,12 +23502,12 @@ ${suffix}`;
     function scheduleAiTurn() {
       clearTimeout(aiTimer);
       const player = onlineCurrentPlayer();
-      if (!player?.ai || !activeRoom?.isHost || onlineBusy || onlineState.phase !== "roll") return;
+      if (!player?.ai || !activeRoom?.isHost || onlineBusy || onlineState.phase !== "roll" || onlineState.rolled) return;
       aiTimer = setTimeout(runAiFirstTurn, onlineAiSkip ? 60 : onlineAiSpeed === "slow" ? 1100 : onlineAiSpeed === "fast" ? 250 : 650);
     }
     async function runAiFirstTurn() {
       const player = onlineCurrentPlayer();
-      if (!player?.ai || !activeRoom?.isHost || onlineBusy) return;
+      if (!player?.ai || !activeRoom?.isHost || onlineBusy || onlineState.phase !== "roll" || onlineState.rolled) return;
       const rolled = cloneOnlineState();
       rolled.rolling = Array.from({ length: core.baseDiceCount(player) }, () => core.rollDie());
       rolled.rolled = true;
