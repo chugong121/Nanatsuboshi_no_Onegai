@@ -1226,7 +1226,7 @@
         <button class="btn btn-block quickref-open" type="button"><i data-lucide="paw-print" aria-hidden="true"></i> 森のどうぶつたち</button>
         <button class="btn btn-primary btn-block room-entry" type="button" data-room-mode="create"><i data-lucide="sparkles" aria-hidden="true"></i> ルームを つくる</button>
         <button class="btn btn-block room-entry" type="button" data-room-mode="join"><i data-lucide="log-in" aria-hidden="true"></i> ルームに はいる</button>
-        <p class="text-small text-muted text-center" aria-label="ゲームの版">修正版 2026.08.26-2</p>
+        <p class="text-small text-muted text-center" aria-label="ゲームの版">修正版 2026.08.26-3</p>
       </div>
     </div>
 
@@ -2672,10 +2672,35 @@
       animation: nanatsuboshi-sparkle-drift .42s ease-in-out infinite alternate;
     }
     #nanatsuboshi-flow.is-dice-rolling .solo-rolling .solo-die,
-    #nanatsuboshi-flow.is-dice-rolling .online-dice:first-of-type .online-die {
+    #nanatsuboshi-flow.is-dice-rolling .online-rolling .online-die {
       animation: nanatsuboshi-live-roll .14s ease-in-out infinite alternate;
       box-shadow: 0 0 12px rgba(255,246,184,.9), 0 0 24px rgba(104,205,255,.58);
     }
+    #nanatsuboshi-flow .dice-roll-sparkles {
+      position: fixed;
+      left: 50%;
+      top: 36%;
+      width: min(88vw, 390px);
+      height: 190px;
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+      z-index: 9998;
+      filter: drop-shadow(0 0 10px rgba(137,222,255,.9));
+    }
+    #nanatsuboshi-flow .dice-roll-sparkles span {
+      position: absolute;
+      color: #fff6b8;
+      font-size: clamp(18px, 7vw, 34px);
+      text-shadow: 0 0 7px #fff, 0 0 18px #76d7ff;
+      animation: nanatsuboshi-sparkle-pop .48s ease-in-out infinite alternate;
+    }
+    #nanatsuboshi-flow .dice-roll-sparkles span:nth-child(1){left:4%;top:18%}
+    #nanatsuboshi-flow .dice-roll-sparkles span:nth-child(2){left:23%;top:2%;animation-delay:-.18s}
+    #nanatsuboshi-flow .dice-roll-sparkles span:nth-child(3){right:24%;top:8%;animation-delay:-.32s}
+    #nanatsuboshi-flow .dice-roll-sparkles span:nth-child(4){right:5%;top:26%;animation-delay:-.1s}
+    #nanatsuboshi-flow .dice-roll-sparkles span:nth-child(5){left:13%;bottom:8%;animation-delay:-.28s}
+    #nanatsuboshi-flow .dice-roll-sparkles span:nth-child(6){left:46%;bottom:0;animation-delay:-.05s}
+    #nanatsuboshi-flow .dice-roll-sparkles span:nth-child(7){right:12%;bottom:12%;animation-delay:-.38s}
     @keyframes nanatsuboshi-live-roll {
       from { transform: translateY(-3px) rotate(-4deg) scale(.97); }
       to { transform: translateY(3px) rotate(4deg) scale(1.04); }
@@ -2684,17 +2709,23 @@
       from { opacity: .45; transform: translateY(-3px) scale(.94); }
       to { opacity: 1; transform: translateY(4px) scale(1.04); }
     }
+    @keyframes nanatsuboshi-sparkle-pop {
+      from { opacity: .28; transform: translateY(-8px) rotate(-12deg) scale(.62); }
+      to { opacity: 1; transform: translateY(8px) rotate(12deg) scale(1.18); }
+    }
     @media (prefers-reduced-motion: reduce) {
       #nanatsuboshi-flow.is-dice-rolling .solo-rolling .solo-die,
-      #nanatsuboshi-flow.is-dice-rolling .online-dice:first-of-type .online-die,
+      #nanatsuboshi-flow.is-dice-rolling .online-rolling .online-die,
       #nanatsuboshi-flow.is-dice-rolling .solo-dice-panel::before,
       #nanatsuboshi-flow.is-dice-rolling .online-dice-panel::before { animation: none; }
+      #nanatsuboshi-flow .dice-roll-sparkles span { animation-duration: 1.2s; transform: none; }
     }
   `;
   document.head.appendChild(style);
 
   let active = null;
-  let soundEnabled = localStorage.getItem('nanatsuboshi-sound-enabled') !== 'false';
+  let soundEnabled = true;
+  try { soundEnabled = localStorage.getItem('nanatsuboshi-sound-enabled') !== 'false'; } catch {}
 
   function tone(context, frequency, duration, volume) {
     const oscillator = context.createOscillator();
@@ -2712,36 +2743,47 @@
   function start(root) {
     active?.stop(false);
     root?.classList.add('is-dice-rolling');
+    const sparkleLayer = document.createElement('div');
+    sparkleLayer.className = 'dice-roll-sparkles';
+    sparkleLayer.setAttribute('aria-hidden','true');
+    sparkleLayer.innerHTML = '<span>✦</span><span>✧</span><span>⋆</span><span>✦</span><span>✧</span><span>⋆</span><span>✦</span>';
+    root?.appendChild(sparkleLayer);
     let context = null;
     let soundTimer = null;
+    let stopped = false;
     try {
       const AudioContext = window.AudioContext || window.webkitAudioContext;
       if (soundEnabled && AudioContext) {
         context = new AudioContext();
-        if (context.state === 'suspended') void context.resume().catch(() => {});
-        const sparkle = () => tone(context, 650 + Math.random() * 520, .075, .025);
-        sparkle();
-        soundTimer = window.setInterval(sparkle, 82);
+        const beginSound = async () => {
+          if (context.state === 'suspended') await context.resume();
+          if (stopped || context.state !== 'running') return;
+          const sparkle = () => tone(context, 680 + Math.random() * 560, .08, .055);
+          sparkle();
+          soundTimer = window.setInterval(sparkle, 90);
+        };
+        void beginSound().catch(() => {});
       }
     } catch {}
 
-    let stopped = false;
     const controller = {
       stop(settled = true) {
         if (stopped) return;
         stopped = true;
         root?.classList.remove('is-dice-rolling');
+        sparkleLayer.remove();
         if (soundTimer) window.clearInterval(soundTimer);
-        if (!context) return;
-        try {
-          if (settled) {
-            tone(context, 1046.5, .14, .035);
-            window.setTimeout(() => tone(context, 1318.5, .18, .03), 65);
-            window.setTimeout(() => context.close(), 320);
-          } else {
-            context.close();
-          }
-        } catch {}
+        if (context) {
+          try {
+            if (settled && context.state === 'running') {
+              tone(context, 1046.5, .14, .065);
+              window.setTimeout(() => tone(context, 1318.5, .18, .055), 65);
+              window.setTimeout(() => context.close(), 320);
+            } else {
+              void context.close();
+            }
+          } catch {}
+        }
         if (active === controller) active = null;
       },
     };
@@ -2749,15 +2791,31 @@
     return controller;
   }
 
+  function playEnabledTone() {
+    try {
+      const AudioContext = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContext) return;
+      const context = new AudioContext();
+      const play = async () => {
+        if (context.state === 'suspended') await context.resume();
+        tone(context, 880, .12, .06);
+        window.setTimeout(() => context.close(), 220);
+      };
+      void play().catch(() => {});
+    } catch {}
+  }
+
   function setSoundEnabled(enabled) {
     soundEnabled = Boolean(enabled);
-    localStorage.setItem('nanatsuboshi-sound-enabled', String(soundEnabled));
+    try { localStorage.setItem('nanatsuboshi-sound-enabled', String(soundEnabled)); } catch {}
     if (!soundEnabled) active?.stop(false);
     document.querySelectorAll('[data-sound-toggle]').forEach((input) => {
       input.checked = soundEnabled;
+      input.setAttribute('aria-label', soundEnabled ? '効果音 ON' : '効果音 OFF');
       const label = input.closest('label')?.querySelector('[data-sound-label]');
       if (label) label.textContent = soundEnabled ? '音 ON' : '音 OFF';
     });
+    if (soundEnabled) playEnabledTone();
   }
 
   globalThis.NanatsuboshiRollEffects = {
@@ -2767,7 +2825,7 @@
   };
 
   document.addEventListener('change', (event) => {
-    if (event.target.matches('[data-sound-toggle]')) setSoundEnabled(event.target.checked);
+    if (event.target instanceof Element && event.target.matches('[data-sound-toggle]')) setSoundEnabled(event.target.checked);
   });
 })();
 
@@ -23113,6 +23171,8 @@ ${suffix}`;
     const startButton = $(".room-start-online");
     const lobbyStatus = $(".room-lobby-status");
     const gameScreen = $(".game-screen");
+    const wishScreen = $('[data-screen="wish"]');
+    const resultScreen = $('[data-screen="result"]');
     let activeRoom = null;
     let channel = null;
     let activeUserId = null;
@@ -23122,9 +23182,15 @@ ${suffix}`;
     let onlineRevision = 0;
     let onlineBusy = false;
     let aiTimer = null;
-    let onlineAiSpeed = localStorage.getItem("nanatsuboshi-online-ai-speed") || "normal";
-    let onlineAiSkip = localStorage.getItem("nanatsuboshi-online-ai-skip") === "true";
+    let onlineAiSpeed = "normal";
+    let onlineAiSkip = false;
+    try {
+      onlineAiSpeed = localStorage.getItem("nanatsuboshi-online-ai-speed") || "normal";
+      onlineAiSkip = localStorage.getItem("nanatsuboshi-online-ai-skip") === "true";
+    } catch {
+    }
     let pendingRecruitNo = null;
+    let pendingOwnedNo = null;
     const core = globalThis.NanatsuboshiCore;
     const faces = ["\u2680", "\u2681", "\u2682", "\u2683", "\u2684", "\u2685"];
     const setFeedback = (message, kind = "") => {
@@ -23238,8 +23304,9 @@ ${suffix}`;
       root.dataset.activePlayerCount = String(onlineState.players?.length || 2);
       root.dataset.cardSupply = JSON.stringify(onlineState.supply || core.supplyForPlayers(onlineState.players?.length || 2));
       onlineBusy = false;
+      const activeScreen = onlineState.phase === "wish-intro" ? wishScreen : onlineState.phase === "finished" ? resultScreen : gameScreen;
       root.querySelectorAll("[data-screen]").forEach((screen) => {
-        screen.hidden = screen !== gameScreen;
+        screen.hidden = screen !== activeScreen;
       });
       renderOnlineBoard();
       scheduleAiTurn();
@@ -23267,20 +23334,46 @@ ${suffix}`;
         renderOnlineBoard();
         return false;
       }
-      const row = data?.[0];
-      if (row) receiveOnlineState(row.revision, row.state);
+      const row = Array.isArray(data) ? data[0] : data;
+      if (row?.state) receiveOnlineState(row.revision, row.state);
+      else if (!await reloadOnlineState()) {
+        onlineBusy = false;
+        renderOnlineBoard();
+        return false;
+      }
       return true;
     }
     async function reloadOnlineState() {
-      if (!activeRoom) return;
+      if (!activeRoom) return false;
       const { data, error } = await client.from("ns_game_states").select("revision,state").eq("room_id", activeRoom.id).single();
-      if (!error) receiveOnlineState(data.revision, data.state);
+      if (error || !data?.state) return false;
+      receiveOnlineState(data.revision, data.state);
+      return true;
     }
     function cloneOnlineState() {
       return core.hydrateState(core.serializeState(onlineState));
     }
+    function renderOnlineWishIntro() {
+      if (!wishScreen) return;
+      const first = onlineState.players.find((player) => player.id === onlineState.firstWisherId);
+      wishScreen.innerHTML = `<span class="paint paint-b"></span><div class="screen-head"><span class="viz-badge">\u6700\u7D42\u30E9\u30A6\u30F3\u30C9</span><span class="text-small">\u6708\u30A6\u30B5\u30AE\uFF1A${escapeHtml(first?.name || "")}</span></div><h2 class="text-center">\u9858\u3044\u306E\u591C</h2><div class="best-record"><span class="text-small text-muted">\u3044\u307E\u4E00\u756A\u5F37\u3044\u661F\u5EA7</span><strong>\u300C${onlineState.wishBestScore?.v || "-"}\u300D\u304C${onlineState.wishBestScore?.n || 0}\u500B</strong><span class="text-small">${escapeHtml(first?.name || "")}\u304C\u9858\u3044\u306E\u6D41\u308C\u661F\u3092\u547C\u3073\u307E\u3057\u305F</span></div><div class="card"><h3>\u6700\u5F8C\u306E\u9858\u3044\u3092\u5C4A\u3051\u3088\u3046</h3><p>\u8868\u793A\u9806\u306B\u5168\u54E1\u304C1\u56DE\u305A\u3064\u6311\u6226\u3057\u3001\u6700\u521D\u306B\u6D41\u308C\u661F\u3092\u547C\u3093\u3060\u4EBA\u306F\u6700\u5F8C\u306B\u6311\u6226\u3057\u307E\u3059\u3002</p><p class="text-small text-muted">\u5B8C\u5168\u306B\u540C\u3058\u7D50\u679C\u306A\u3089\u5148\u306B\u6311\u6226\u3057\u305F\u4EBA\u304C\u4E0A\u4F4D\u3002\u305F\u3060\u3057\u6700\u521D\u306B\u547C\u3093\u3060\u4EBA\u306F\u3001\u6700\u5F8C\u306B\u540C\u3058\u7D50\u679C\u3092\u51FA\u305B\u3070\u6D41\u308C\u661F\u3092\u53D6\u308A\u623B\u305B\u307E\u3059\u3002</p></div>${activeRoom?.isHost ? '<button class="btn btn-primary btn-block online-start-wish" type="button">\u9858\u3044\u306E\u591C\u3092 \u306F\u3058\u3081\u308B</button>' : '<p class="text-center text-muted">\u90E8\u5C4B\u4E3B\u304C\u9858\u3044\u306E\u591C\u3092\u59CB\u3081\u308B\u307E\u3067\u5F85\u3063\u3066\u306D\u3002</p>'}`;
+    }
+    function renderOnlineResult() {
+      if (!resultScreen) return;
+      const ranked = core.rankPlayers(onlineState.players);
+      const winner = onlineState.players.find((player) => player.id === onlineState.wishHolderId) || ranked[0];
+      resultScreen.innerHTML = `<span class="paint paint-a"></span><div class="screen-head"><span class="viz-badge">\u30B2\u30FC\u30E0\u7D42\u4E86</span></div><h2 class="text-center">${escapeHtml(winner?.name || "")}\u306E\u304A\u9858\u3044\u304C<br>\u6D41\u308C\u661F\u306B\u5C4A\u304D\u307E\u3057\u305F\uFF01</h2><div class="best-record"><strong>\u300C${escapeHtml(winner?.wish || "")}\u300D</strong><span class="text-small">\u6700\u5F8C\u306E\u661F\u5EA7\uFF1A\u300C${winner?.score?.v || "-"}\u300D\u304C${winner?.score?.n || 0}\u500B</span></div><div class="card">${ranked.map((player, index) => `<div class="ability"><span>${index + 1}\u4F4D\u3000${escapeHtml(player.name)}</span><strong>${player.score?.v || "-"} \xD7 ${player.score?.n || 0}</strong></div>`).join("")}</div><button class="btn btn-primary btn-block online-result-title" type="button">\u30BF\u30A4\u30C8\u30EB\u3078</button>`;
+    }
     function renderOnlineBoard() {
       if (!onlineState || !gameScreen) return;
+      if (onlineState.phase === "wish-intro") {
+        renderOnlineWishIntro();
+        return;
+      }
+      if (onlineState.phase === "finished") {
+        renderOnlineResult();
+        return;
+      }
       const player = onlineCurrentPlayer();
       const own = isOwnOnlineTurn();
       const selected = onlineState.selected || /* @__PURE__ */ new Set();
@@ -23288,26 +23381,26 @@ ${suffix}`;
       const canKeep = own && !onlineBusy && onlineState.phase === "roll" && onlineState.rolled && selected.size > 0 && !onlineState.ability;
       const ability = onlineState.ability;
       const abilityReady = ability ? core.isAbilityReady({ ability, rolling: onlineState.rolling, kept: onlineState.kept }) : false;
-      const phaseCopy = player?.ai ? "\u68EE\u306EAI\u304C\u661F\u3092\u9078\u3093\u3067\u3044\u307E\u3059\u2026" : own ? onlineState.phase === "recruit" ? "\u8FCE\u3048\u308B\u4EF2\u9593\u3092\u9078\u3093\u3067\u306D" : ability ? core.abilityInstruction(ability.no) : onlineState.rolled ? "\u661F\u30921\u500B\u4EE5\u4E0A\u9078\u3073\u300C\u6C7A\u3081\u308B\u300D\u3092\u62BC\u3057\u3066\u306D" : "\u3053\u308D\u304C\u3057\u4E2D\u306E\u661F\u3092\u632F\u3063\u3066\u306D" : `${escapeHtml(player?.name || "")}\u304C\u661F\u3092\u9078\u3093\u3067\u3044\u307E\u3059\u2026`;
+      const phaseCopy = player?.ai ? "\u68EE\u306EAI\u304C\u661F\u3092\u9078\u3093\u3067\u3044\u307E\u3059\u2026" : own ? onlineState.phase === "final-complete" ? "\u6700\u5F8C\u306E\u661F\u5EA7\u304C\u5B8C\u6210\u3057\u307E\u3057\u305F" : onlineState.phase === "recruit" ? "\u8FCE\u3048\u308B\u4EF2\u9593\u3092\u9078\u3093\u3067\u306D" : ability ? core.abilityInstruction(ability.no) : onlineState.rolled ? "\u661F\u30921\u500B\u4EE5\u4E0A\u9078\u3073\u300C\u6C7A\u3081\u308B\u300D\u3092\u62BC\u3057\u3066\u306D" : "\u3053\u308D\u304C\u3057\u4E2D\u306E\u661F\u3092\u632F\u3063\u3066\u306D" : `${escapeHtml(player?.name || "")}\u304C\u661F\u3092\u9078\u3093\u3067\u3044\u307E\u3059\u2026`;
       const eligible = onlineState.phase === "recruit" ? core.eligibleCompanions(player, onlineState.kept, onlineState.supply) : [];
       gameScreen.innerHTML = `<div class="online-board">
       <div class="online-game-top"><span class="viz-badge">\u30E9\u30A6\u30F3\u30C9 ${onlineState.round}</span><button class="btn online-rules" type="button">\u30EB\u30FC\u30EB</button><button class="btn online-quickref" type="button">\u65E9\u898B\u8868</button><button class="btn online-title" type="button">\u30BF\u30A4\u30C8\u30EB\u3078</button></div>
       <div class="online-turn-panel">
         <div class="online-head"><strong>${escapeHtml(player?.name || "")}\u306E\u756A</strong><span class="text-small">${onlineState.turn + 1}\u756A\u624B / ${onlineState.players.length}\u4EBA</span></div>
-        <div class="online-ai-settings"><select class="form-select online-ai-speed" aria-label="AI\u6F14\u51FA\u306E\u901F\u5EA6"><option value="slow" ${onlineAiSpeed === "slow" ? "selected" : ""}>\u3086\u3063\u304F\u308A</option><option value="normal" ${onlineAiSpeed === "normal" ? "selected" : ""}>\u3075\u3064\u3046</option><option value="fast" ${onlineAiSpeed === "fast" ? "selected" : ""}>\u306F\u3084\u3044</option></select><label><input class="online-ai-skip" type="checkbox" ${onlineAiSkip ? "checked" : ""}>\u6F14\u51FA\u30B9\u30AD\u30C3\u30D7</label></div>
+        <div class="online-ai-settings"><select class="form-select online-ai-speed" aria-label="AI\u6F14\u51FA\u306E\u901F\u5EA6"><option value="slow" ${onlineAiSpeed === "slow" ? "selected" : ""}>\u3086\u3063\u304F\u308A</option><option value="normal" ${onlineAiSpeed === "normal" ? "selected" : ""}>\u3075\u3064\u3046</option><option value="fast" ${onlineAiSpeed === "fast" ? "selected" : ""}>\u306F\u3084\u3044</option></select><label><input class="online-ai-skip" type="checkbox" ${onlineAiSkip ? "checked" : ""}>\u6F14\u51FA\u30B9\u30AD\u30C3\u30D7</label><label><input data-sound-toggle type="checkbox" ${globalThis.NanatsuboshiRollEffects?.isSoundEnabled() !== false ? "checked" : ""}><span data-sound-label>${globalThis.NanatsuboshiRollEffects?.isSoundEnabled() !== false ? "\u97F3 ON" : "\u97F3 OFF"}</span></label></div>
       </div>
       <div class="online-turns">${onlineState.players.map((p, i) => `<span class="online-person ${i === onlineState.turn ? "current" : ""}">${i + 1} ${escapeHtml(p.name)}${p.ai ? "\u30FBAI" : ""}</span>`).join("")}</div>
       <p class="online-phase" role="status">${phaseCopy}</p>
       <section class="online-dice-panel">
         <strong>\u3053\u308D\u304C\u3057\u4E2D\u306E\u661F</strong>
-        <div class="online-dice">${onlineState.rolling.length ? onlineState.rolling.map((value, index) => `<button class="online-die ${selected.has(index) ? "selected" : ""} ${ability?.rolling?.has(index) ? "ability-target" : ""}" data-online-die="${index}" ${!own || onlineBusy || !onlineState.rolled && !ability ? "disabled" : ""}>${faces[value - 1]}</button>`).join("") : '<span class="text-muted">\u3042\u308A\u307E\u305B\u3093</span>'}</div>
+        <div class="online-dice online-rolling">${onlineState.rolling.length ? onlineState.rolling.map((value, index) => `<button class="online-die ${selected.has(index) ? "selected" : ""} ${ability?.rolling?.has(index) ? "ability-target" : ""}" data-online-die="${index}" ${!own || onlineBusy || !onlineState.rolled && !ability ? "disabled" : ""}>${faces[value - 1]}</button>`).join("") : '<span class="text-muted">\u3042\u308A\u307E\u305B\u3093</span>'}</div>
         <strong>\u6C7A\u3081\u305F\u661F</strong>
         <div class="online-dice">${onlineState.kept.length ? onlineState.kept.map((value, index) => ability?.no === 10 ? `<button class="online-die kept ${ability.kept?.has(index) ? "ability-target" : ""}" data-online-kept="${index}" ${!own || onlineBusy ? "disabled" : ""}>${faces[value - 1]}</button>` : `<span class="online-die kept">${faces[value - 1]}</span>`).join("") : '<span class="text-muted">\u307E\u3060\u3042\u308A\u307E\u305B\u3093</span>'}</div>
         ${ability ? renderOnlineAbilityTool(ability, abilityReady) : ""}
         <div class="online-actions"><button class="btn btn-primary online-roll" ${canRoll ? "" : "disabled"}>\u661F\u3092 \u3075\u308B</button><button class="btn btn-primary online-keep" ${canKeep ? "" : "disabled"}>\u9078\u3093\u3060\u661F\u3092 \u6C7A\u3081\u308B</button></div>
       </section>
       <section class="online-companions"><h3>\u3044\u3063\u3057\u3087\u306B\u3044\u308B\u4EF2\u9593</h3>${player.cards?.map((no) => renderOnlineOwnedCard(no, player)).join("") || '<span class="text-muted">\u4EF2\u9593\u306F\u3044\u307E\u305B\u3093</span>'}</section>
-      <section class="online-recruits"><h3>\u3044\u307E\u8FCE\u3048\u3089\u308C\u308B\u4EF2\u9593</h3>${onlineState.phase === "recruit" ? eligible.length ? eligible.map((no) => `<button class="online-card online-recruit-card" data-online-recruit="${no}"><strong>No.${String(no).padStart(2, "0")} ${escapeHtml(core.CARDS[no][0])}</strong><span class="effect-genre">${escapeHtml(core.CARD_GENRES[no])}</span><small>\u8FCE\u3048\u308B\u65B9\u6CD5\uFF1A${escapeHtml(core.CARD_CONDITIONS[no])}<br>\u30AB\u30FC\u30C9\u3092\u898B\u3066\u9078\u3076 \u2192</small><span class="online-supply-count">\u68EE\u306B\u3044\u308B\u6B8B\u308A\u6570\uFF1A${core.supplyRemaining(onlineState.supply, no)}${no <= 2 ? "\u7D44" : "\u3072\u304D"}</span></button>`).join("") : '<span class="text-muted">\u8FCE\u3048\u3089\u308C\u308B\u4EF2\u9593\u306F\u3044\u307E\u305B\u3093</span>' : '<span class="text-muted">\u661F\u3092\u3059\u3079\u3066\u6C7A\u3081\u308B\u3068\u8868\u793A\u3055\u308C\u307E\u3059</span>'}${onlineState.phase === "recruit" && own ? '<button class="btn online-recruit-pass" type="button">\u8FCE\u3048\u305A\u306B\u624B\u756A\u3092\u7D42\u3048\u308B</button>' : ""}</section>
+      <section class="online-recruits"><h3>${onlineState.phase === "final-complete" ? "\u6700\u5F8C\u306E\u661F\u5EA7" : "\u3044\u307E\u8FCE\u3048\u3089\u308C\u308B\u4EF2\u9593"}</h3>${onlineState.phase === "final-complete" ? `<div class="online-status">\u300C${player.score?.v || "-"}\u300D\u304C${player.score?.n || 0}\u500B</div>${own ? '<button class="btn btn-primary online-final-submit" type="button">\u6700\u5F8C\u306E\u9858\u3044\u3092 \u5C4A\u3051\u308B</button>' : '<span class="text-muted">\u624B\u756A\u306E\u5B8C\u4E86\u3092\u5F85\u3063\u3066\u3044\u307E\u3059</span>'}` : onlineState.phase === "recruit" ? eligible.length ? eligible.map((no) => `<button class="online-card online-recruit-card" data-online-recruit="${no}"><strong>No.${String(no).padStart(2, "0")} ${escapeHtml(core.CARDS[no][0])}</strong><span class="effect-genre">${escapeHtml(core.CARD_GENRES[no])}</span><small>\u8FCE\u3048\u308B\u65B9\u6CD5\uFF1A${escapeHtml(core.CARD_CONDITIONS[no])}<br>\u30AB\u30FC\u30C9\u3092\u898B\u3066\u9078\u3076 \u2192</small><span class="online-supply-count">\u68EE\u306B\u3044\u308B\u6B8B\u308A\u6570\uFF1A${core.supplyRemaining(onlineState.supply, no)}${no <= 2 ? "\u7D44" : "\u3072\u304D"}</span></button>`).join("") : '<span class="text-muted">\u8FCE\u3048\u3089\u308C\u308B\u4EF2\u9593\u306F\u3044\u307E\u305B\u3093</span>' : '<span class="text-muted">\u661F\u3092\u3059\u3079\u3066\u6C7A\u3081\u308B\u3068\u8868\u793A\u3055\u308C\u307E\u3059</span>'}${onlineState.phase === "recruit" && own ? '<button class="btn online-recruit-pass" type="button">\u8FCE\u3048\u305A\u306B\u624B\u756A\u3092\u7D42\u3048\u308B</button>' : ""}</section>
       <section class="online-log"><strong>\u30B2\u30FC\u30E0\u306E\u8A18\u9332</strong>${(onlineState.logs || []).slice(-8).map((line) => `<div>\u30FB${escapeHtml(line)}</div>`).join("")}</section>
     </div>`;
     }
@@ -23389,9 +23482,13 @@ ${suffix}`;
       next.rolled = false;
       onlineLog(next, `${values.length}\u500B\u3092\u300C\u6C7A\u3081\u305F\u661F\u300D\u306B\u3057\u307E\u3057\u305F\u3002`);
       if (!next.rolling.length) {
-        next.phase = "recruit";
         next.players[next.turn].score = core.scoreDice(next.kept);
         onlineLog(next, `\u661F\u306E\u7D50\u679C\u306F\u300C${next.players[next.turn].score.v}\u300D\u304C${next.players[next.turn].score.n}\u500B\u3002`);
+        if (next.final && next.inFinalRounds) {
+          updateOnlineWishHolder(next, next.players[next.turn]);
+          next.phase = "final-complete";
+          onlineLog(next, `${next.players[next.turn].name}\u306E\u6700\u5F8C\u306E\u661F\u5EA7\u304C\u5B8C\u6210\u3057\u307E\u3057\u305F\u3002`);
+        } else next.phase = "recruit";
       }
       await sendOnlineState("keep", next);
     }
@@ -23470,6 +23567,76 @@ ${suffix}`;
       dialog?.remove();
       pendingRecruitNo = null;
     }
+    function updateOnlineWishHolder(state, player) {
+      const comparison = core.compareDiceScores(player.score, state.wishBestScore);
+      if (comparison > 0 || player.id === state.firstWisherId && comparison === 0) {
+        state.players.forEach((member) => {
+          member.cards = (member.cards || []).filter((no) => no !== 19);
+        });
+        if (!player.cards.includes(19)) player.cards.push(19);
+        state.wishBestScore = { ...player.score };
+        state.wishHolderId = player.id;
+        onlineLog(state, `${player.name}\u306B\u9858\u3044\u306E\u6D41\u308C\u661F\u304C\u79FB\u308A\u307E\u3057\u305F\u3002`);
+      }
+    }
+    function resetOnlineTurn(state) {
+      state.rolling = [];
+      state.kept = [];
+      state.selected = /* @__PURE__ */ new Set();
+      state.rolled = false;
+      state.phase = "roll";
+      state.ability = null;
+      if (state.players[state.turn]) state.players[state.turn].used = /* @__PURE__ */ new Set();
+      onlineLog(state, `${state.players[state.turn].name}\u306E\u756A\u3067\u3059\u3002`);
+    }
+    function advanceOnlineState(state) {
+      const advance = core.advanceTurn({ turn: state.turn, round: state.round, final: state.final, inFinalRounds: state.inFinalRounds, finalTurns: state.finalTurns, playerCount: state.players.length });
+      state.finalTurns = advance.finalTurns;
+      if (advance.finished) {
+        state.phase = "finished";
+        state.winnerId = state.wishHolderId;
+        state.rolling = [];
+        state.kept = [];
+        state.selected = /* @__PURE__ */ new Set();
+        state.rolled = false;
+        state.ability = null;
+        onlineLog(state, `${state.players.find((player) => player.id === state.wishHolderId)?.name || "\u52DD\u8005"}\u306E\u304A\u9858\u3044\u304C\u6D41\u308C\u661F\u306B\u5C4A\u304D\u307E\u3057\u305F\u3002`);
+        return;
+      }
+      state.turn = advance.turn;
+      state.round = advance.round;
+      if (advance.rotatePlayers) {
+        state.players = core.rotateRoundPlayers(state.players);
+        state.turn = 0;
+        if (state.final && !state.inFinalRounds) {
+          state.players = core.finalRoundPlayers(state.players, state.firstWisherId);
+          state.phase = "wish-intro";
+          state.rolling = [];
+          state.kept = [];
+          state.selected = /* @__PURE__ */ new Set();
+          state.rolled = false;
+          state.ability = null;
+          onlineLog(state, "\u9858\u3044\u306E\u591C\u304C\u59CB\u307E\u308A\u307E\u3059\uFF01");
+          return;
+        }
+      }
+      resetOnlineTurn(state);
+    }
+    async function startOnlineWishNight() {
+      if (!activeRoom?.isHost || onlineBusy || onlineState.phase !== "wish-intro") return;
+      const next = cloneOnlineState();
+      next.inFinalRounds = true;
+      next.finalTurns = 0;
+      next.turn = 0;
+      resetOnlineTurn(next);
+      await sendOnlineState("wish_start", next);
+    }
+    async function finishOnlineFinalTurn() {
+      if (!isOwnOnlineTurn() || onlineBusy || onlineState.phase !== "final-complete") return;
+      const next = cloneOnlineState();
+      advanceOnlineState(next);
+      await sendOnlineState("final_turn_end", next);
+    }
     async function finishOnlineTurn(recruitNo = null) {
       if (!isOwnOnlineTurn() || onlineState.phase !== "recruit") return;
       const next = cloneOnlineState();
@@ -23483,19 +23650,15 @@ ${suffix}`;
         player.cards = result.cards;
         next.supply = result.supply;
         onlineLog(next, `${player.name}\u304C\u300C${core.CARDS[recruitNo][0]}\u300D\u3092\u8FCE\u3048\u307E\u3057\u305F\u3002`);
-        if (result.startsWishNight) next.final = true;
+        if (result.startsWishNight) {
+          next.final = true;
+          next.firstWisherId = player.id;
+          next.wishHolderId = player.id;
+          next.wishBestScore = { ...player.score };
+          onlineLog(next, "\u9858\u3044\u306E\u6D41\u308C\u661F\u3092\u547C\u3073\u307E\u3057\u305F\u3002\u3053\u306E\u30E9\u30A6\u30F3\u30C9\u3092\u6700\u5F8C\u307E\u3067\u7D9A\u3051\u307E\u3059\u3002");
+        }
       } else onlineLog(next, `${player.name}\u306F\u4EF2\u9593\u3092\u8FCE\u3048\u305A\u306B\u624B\u756A\u3092\u7D42\u3048\u307E\u3057\u305F\u3002`);
-      const advance = core.advanceTurn({ turn: next.turn, round: next.round, final: false, inFinalRounds: false, finalTurns: next.finalTurns, playerCount: next.players.length });
-      next.turn = advance.turn;
-      next.round = advance.round;
-      next.rolling = [];
-      next.kept = [];
-      next.selected = /* @__PURE__ */ new Set();
-      next.rolled = false;
-      next.phase = "roll";
-      next.ability = null;
-      next.players[next.turn].used = /* @__PURE__ */ new Set();
-      onlineLog(next, `${next.players[next.turn].name}\u306E\u756A\u3067\u3059\u3002`);
+      advanceOnlineState(next);
       closeRecruitCard();
       await sendOnlineState("turn_end", next);
     }
@@ -23513,10 +23676,18 @@ ${suffix}`;
       rolled.rolled = true;
       rolled.selected = /* @__PURE__ */ new Set();
       onlineLog(rolled, `${player.name}\u304C\u661F\u3092\u632F\u308A\u307E\u3057\u305F\u3002`);
+      const effects = globalThis.NanatsuboshiRollEffects?.start(root);
+      await new Promise((resolve) => window.setTimeout(resolve, onlineAiSkip ? 90 : 525));
+      effects?.stop();
       if (!await sendOnlineState("roll", rolled)) return;
       aiTimer = setTimeout(async () => {
+        for (let attempt = 0; onlineBusy && attempt < 30; attempt += 1) await new Promise((resolve) => window.setTimeout(resolve, 100));
+        if (onlineBusy && !await reloadOnlineState()) {
+          aiTimer = setTimeout(runAiFirstTurn, 500);
+          return;
+        }
         const current = onlineCurrentPlayer();
-        if (!current?.ai || onlineBusy) return;
+        if (!current?.ai || onlineBusy || onlineState.phase !== "roll" || !onlineState.rolled) return;
         const done = cloneOnlineState();
         done.kept = [...done.rolling];
         done.rolling = [];
@@ -23524,26 +23695,31 @@ ${suffix}`;
         done.selected = /* @__PURE__ */ new Set();
         done.players[done.turn].score = core.scoreDice(done.kept);
         onlineLog(done, `${current.name}\u306F\u661F\u3092\u3059\u3079\u3066\u6C7A\u3081\u307E\u3057\u305F\u3002`);
+        if (done.final && done.inFinalRounds) {
+          updateOnlineWishHolder(done, done.players[done.turn]);
+          onlineLog(done, `${current.name}\u306E\u6700\u5F8C\u306E\u661F\u5EA7\u304C\u5B8C\u6210\u3057\u307E\u3057\u305F\u3002`);
+          advanceOnlineState(done);
+          await sendOnlineState("final_turn_end", done);
+          return;
+        }
         const choices = core.eligibleCompanions(done.players[done.turn], done.kept, done.supply);
         if (choices.length) {
-          const no = choices[0];
+          const no = Math.max(...choices);
           const result = core.recruitCompanion({ no, player: done.players[done.turn], players: done.players, dice: done.kept, supply: done.supply });
           if (result.ok) {
             done.players[done.turn].cards = result.cards;
             done.supply = result.supply;
-            if (result.startsWishNight) done.final = true;
+            if (result.startsWishNight) {
+              done.final = true;
+              done.firstWisherId = done.players[done.turn].id;
+              done.wishHolderId = done.players[done.turn].id;
+              done.wishBestScore = { ...done.players[done.turn].score };
+              onlineLog(done, "\u9858\u3044\u306E\u6D41\u308C\u661F\u3092\u547C\u3073\u307E\u3057\u305F\u3002\u3053\u306E\u30E9\u30A6\u30F3\u30C9\u3092\u6700\u5F8C\u307E\u3067\u7D9A\u3051\u307E\u3059\u3002");
+            }
             onlineLog(done, `${current.name}\u304C\u300C${core.CARDS[no][0]}\u300D\u3092\u8FCE\u3048\u307E\u3057\u305F\u3002`);
           }
         }
-        const advance = core.advanceTurn({ turn: done.turn, round: done.round, final: false, inFinalRounds: false, finalTurns: done.finalTurns, playerCount: done.players.length });
-        done.turn = advance.turn;
-        done.round = advance.round;
-        done.kept = [];
-        done.rolling = [];
-        done.phase = "roll";
-        done.ability = null;
-        done.players[done.turn].used = /* @__PURE__ */ new Set();
-        onlineLog(done, `${done.players[done.turn].name}\u306E\u756A\u3067\u3059\u3002`);
+        advanceOnlineState(done);
         await sendOnlineState("turn_end", done);
       }, onlineAiSkip ? 70 : onlineAiSpeed === "slow" ? 1200 : onlineAiSpeed === "fast" ? 280 : 700);
     }
@@ -23553,8 +23729,30 @@ ${suffix}`;
       typeof dialog.showModal === "function" ? dialog.showModal() : dialog.setAttribute("open", "");
     }
     function openOnlineCard(no) {
-      $(".quickref-open")?.click();
-      window.setTimeout(() => $(".quickref-list")?.querySelector(`[data-card-no="${String(no).padStart(2, "0")}"]`)?.click(), 0);
+      const dialog = $(".companion-dialog"), body = $(".card-detail-body");
+      if (!dialog || !body || !core.CARDS[no]) return;
+      pendingOwnedNo = no;
+      const image = $(".card-detail-art");
+      if (image) {
+        image.src = cardArt(no);
+        image.alt = `${core.CARDS[no][0]}\u306E\u6C34\u5F69\u30A4\u30E9\u30B9\u30C8`;
+      }
+      $(".card-detail-level").textContent = `Lv.${core.CARD_LEVELS[no]}`;
+      $(".card-detail-genre").textContent = core.CARD_GENRES[no];
+      $(".card-detail-number").textContent = `No.${String(no).padStart(2, "0")}`;
+      $(".card-detail-name").textContent = core.CARDS[no][0];
+      $(".card-detail-condition").textContent = core.CARD_CONDITIONS[no];
+      $(".card-detail-effect").textContent = core.CARDS[no][1];
+      $(".card-detail-timing").textContent = core.AUTO_CARDS.includes(no) ? "\u81EA\u5206\u306E\u624B\u756A\u958B\u59CB\u6642\u306B\u81EA\u52D5\u3067\u767A\u52D5\u3002" : no === 10 ? "\u661F\u3092\u632F\u3063\u305F\u3042\u3068\u3001\u6C7A\u3081\u305F\u661F\u304C1\u500B\u4EE5\u4E0A\u3042\u308B\u3068\u304D\u30021\u624B\u756A\u306B\u3064\u304D1\u56DE\u3002" : "\u661F\u3092\u632F\u3063\u305F\u3042\u3068\u3001\u3059\u3079\u3066\u306E\u661F\u3092\u6C7A\u3081\u7D42\u3048\u308B\u524D\u30021\u624B\u756A\u306B\u3064\u304D1\u56DE\u3002";
+      const remaining = core.supplyRemaining(onlineState.supply, no), unit = no <= 2 ? "\u7D44" : "\u3072\u304D";
+      $(".card-detail-supply").textContent = Number.isFinite(remaining) ? `\u6B8B\u308A${remaining}${unit}` : "\u7279\u5225\u306A\u4EF2\u9593";
+      body.querySelector(".online-modal-actions")?.remove();
+      body.querySelector(".online-ability-note")?.remove();
+      body.querySelector(".solo-modal-actions")?.remove();
+      body.querySelector(".solo-ability-note")?.remove();
+      const availability = core.abilityAvailability(no, onlineState, onlineCurrentPlayer());
+      body.insertAdjacentHTML("beforeend", `<p class="online-ability-note text-small ${availability.ok ? "ready" : "text-muted"}">${escapeHtml(availability.ok ? "\u4ECA\u306A\u3089\u3053\u306E\u3061\u304B\u3089\u3092\u4F7F\u3048\u307E\u3059\u3002" : availability.label)}</p><div class="online-modal-actions online-actions"><button class="btn online-card-close" type="button">\u3068\u3058\u308B</button><button class="btn btn-primary online-use-card" type="button" data-online-use-card="${no}" ${availability.ok ? "" : "disabled"}>\u3053\u306E\u3061\u304B\u3089\u3092\u4F7F\u3046</button></div>`);
+      typeof dialog.showModal === "function" ? dialog.showModal() : dialog.setAttribute("open", "");
     }
     async function leaveOnlineGame() {
       clearTimeout(aiTimer);
@@ -23667,9 +23865,7 @@ ${suffix}`;
       }
       const owned = event.target.closest("[data-online-card]");
       if (owned) {
-        const no = Number(owned.dataset.onlineCard);
-        if (core.abilityAvailability(no, onlineState, onlineCurrentPlayer()).ok) startOnlineAbility(no);
-        else openOnlineCard(no);
+        openOnlineCard(Number(owned.dataset.onlineCard));
         return;
       }
       const recruit = event.target.closest("[data-online-recruit]");
@@ -23679,6 +23875,10 @@ ${suffix}`;
       }
       if (event.target.closest(".online-recruit-pass")) {
         finishOnlineTurn();
+        return;
+      }
+      if (event.target.closest(".online-final-submit")) {
+        finishOnlineFinalTurn();
         return;
       }
       if (event.target.closest(".online-ability-cancel")) {
@@ -23706,16 +23906,45 @@ ${suffix}`;
       }
       if (event.target.matches(".online-ai-speed")) {
         onlineAiSpeed = event.target.value;
-        localStorage.setItem("nanatsuboshi-online-ai-speed", onlineAiSpeed);
+        try {
+          localStorage.setItem("nanatsuboshi-online-ai-speed", onlineAiSpeed);
+        } catch {
+        }
         scheduleAiTurn();
       }
       if (event.target.matches(".online-ai-skip")) {
         onlineAiSkip = event.target.checked;
-        localStorage.setItem("nanatsuboshi-online-ai-skip", String(onlineAiSkip));
+        try {
+          localStorage.setItem("nanatsuboshi-online-ai-skip", String(onlineAiSkip));
+        } catch {
+        }
         scheduleAiTurn();
       }
     });
     root.addEventListener("click", (event) => {
+      if (event.target.closest(".online-start-wish")) {
+        startOnlineWishNight();
+        return;
+      }
+      if (event.target.closest(".online-result-title")) {
+        leaveOnlineGame();
+        return;
+      }
+      const useCard = event.target.closest("[data-online-use-card]");
+      if (useCard && pendingOwnedNo !== null) {
+        const no = Number(useCard.dataset.onlineUseCard);
+        const dialog = $(".companion-dialog");
+        if (dialog?.open && typeof dialog.close === "function") dialog.close();
+        pendingOwnedNo = null;
+        startOnlineAbility(no);
+        return;
+      }
+      if (event.target.closest(".online-card-close")) {
+        const dialog = $(".companion-dialog");
+        if (dialog?.open && typeof dialog.close === "function") dialog.close();
+        pendingOwnedNo = null;
+        return;
+      }
       if (event.target.closest(".online-recruit-cancel")) {
         closeRecruitCard();
         return;
